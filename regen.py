@@ -3,15 +3,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from fluids.friction import friction_factor
 from fluids.core import Reynolds
-from CoolProp.CoolProp import PropsSI
+from CoolProp.CoolProp import PQ_INPUTS, PropsSI
 
 edh = 0.001     # Relative roughness (epsilon / d)
 d_h = 0.003
-p_in = 32e5
+p_in = 32e5 #pressure in also defined inside calculation loop. Change there also
 p_c = 20e5
 T_in = 300
-
-def p_loss(f, rho, v, l, d_h):
+m_dot = 0.003
+def p_loss(f, rho, v, l, d_h): 
     dp = f * rho * v**2 * l / (2 * d_h)
     return dp
 
@@ -42,8 +42,9 @@ def properties(temp,pressure):
     return [rho,mu,cp,h,k]
 
 def main():
+    p_in = 30e5
     dp = p_in - p_c
-    length = 0.3 
+    length = 0.3
     l = np.linspace(0, length, 200)
     N = len(l)
     v = np.zeros(N)
@@ -59,40 +60,33 @@ def main():
     cp_local = np.zeros(N)
     h_local = np.zeros(N)
     k_local = np.zeros(N)
+    
+    #fluid properties
+    re_local= np.zeros(N)
 
     # Initialise properties at the inlet
-    rho_local[0], mu_local[0], cp_local[0], h_local[0], k_local[0] = (properties(T[0], p[0]))
     dl = np.diff(l)
-    p = np.zeros(N)
     area= np.repeat(1,N)
     p[0] = p_in
-    rho_local = np.full(N,rho)
-    re = Reynolds(V=v, D=d_h, rho=rho_local[0], mu=1e-3)
-    f = np.full(N, friction_factor(Re=re, eD=edh))
 
-    while True:
+    for j in range(10):
         for i in range(N - 1):
-            dp = p_loss(f[i], rho_local[i], v, dl[i], d_h)
-            p[i + 1] = p[i] - dp
-            v[i]= m_dot/area[i]
-
-
-            re = Reynolds(
-                V=v, D=d_h,
-                rho=rho_local[i + 1], mu=1e-3
-            )
-            f[i + 1] = friction_factor(Re=re, eD=edh)
-
-        p_res = p[N - 1] - p_c
-        res = p_res / (p[0] - p_c)
-        print(res)
+            rho_local, mu_local, cp_local, h_local, k_local = (properties(T, p))
+            v= m_dot/(area*rho_local)
+            re_local = Reynolds(V=v, D=d_h, rho=rho_local,mu=mu_local)
+            f= friction_factor(Re=re_local, eD=edh)
+            dp = p_loss(f, rho_local, v, dl, d_h)
+            for i in range(N-1):
+                p[i+1]=p[i]- dp[i]
+            p[0]=p_in
 
         diff= max(np.diff(p))
-        
+        res = (p[N-1]-p_c)/(p_in - p_c)
+        print(res)
         if abs(res) < 0.001  and abs(diff) <=0.05*abs(p_in-p_c):
             break
 
-        v = v / np.sqrt(1 - res)
+        p_in = p_in / np.sqrt(1 - res)
 
 
     fig,ax= plt.subplots()
