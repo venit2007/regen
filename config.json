@@ -1,0 +1,21 @@
+{
+  "fluid": "Ethanol",
+  "T_coolant": 300.0,
+  "p_in": 3000000.0,
+  "p_target_out": 2000000.0,
+  "m_dot": 1.1,
+  "N_ch": 40,
+  "delta": 0.00095,
+  "w_b": 0.001,
+  "t_wall": 0.001,
+  "relative_roughness": 0.001,
+  "gas_p0_Pa": 3500000.0,
+  "gas_c_star_m_s": 1419.9024,
+  "gas_D_star_m": 0.03184,
+  "gas_r_c_m": 0.00608,
+  "gas_mu0_Pa_s": 0.00007247,
+  "gas_cp0_J_kgK": 1889.1,
+  "gas_Pr0": 0.5807,
+  "gas_rho0_kg_m3": 3.9631,
+  "gas_mu_ref_power_exponent": 0.676
+}
