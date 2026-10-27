@@ -530,8 +530,8 @@ def march_coolant_energy(T_in, q_cell, cp_cell, A_heating_cell, m_dot_total):
         raise ValueError("Eq. 7 inputs must be finite.")
     if not np.isfinite(T_in) or T_in <= 0.0 or not np.isfinite(m_dot_total) or m_dot_total <= 0.0:
         raise ValueError("Eq. 7 requires positive finite inlet temperature and total flow.")
-    if np.any(q_cell < 0.0) or np.any(cp_cell <= 0.0) or np.any(A_heating_cell <= 0.0):
-        raise ValueError("Eq. 7 requires non-negative heat flux and positive cp and area.")
+    if np.any(q_cell < 0.0) or np.any(cp_cell <= 0.0) or np.any(A_heating_cell < 0.0):
+        raise ValueError("Eq. 7 requires non-negative heat flux and area, and positive cp.")
 
     T = np.empty(q_cell.size + 1, dtype=float)
     T[0] = T_in

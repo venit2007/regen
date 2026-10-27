@@ -1,0 +1,23 @@
+benchmark_id,case_id,source_table_or_figure,quantity,reference_value,unit,value_type,interpretation_note,source_url
+B01,all,Table 4,Urbano and Nasuti reference inlet total bulk pressure,13.0851,MPa,published_absolute,Reference value reported in the paper.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B02,q0MW,Table 4,CFD inlet total bulk pressure,13.0859,MPa,published_absolute,0 MW/m² case.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B03,q1MW,Table 4,CFD inlet total bulk pressure,13.0832,MPa,published_absolute,1 MW/m² case.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B04,q3MW,Table 4,CFD inlet total bulk pressure,13.0882,MPa,published_absolute,3 MW/m² case.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B05,q0MW,Table 4,CFD inlet pressure deviation reported by paper,0.01,%,reported_rounded_deviation,Paper reports absolute percentage difference rounded to 0.01%.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B06,q1MW,Table 4,CFD inlet pressure deviation reported by paper,0.01,%,reported_rounded_deviation,Paper reports absolute percentage difference rounded to 0.01%.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B07,q3MW,Table 4,CFD inlet pressure deviation reported by paper,0.02,%,reported_rounded_deviation,Paper reports absolute percentage difference rounded to 0.02%.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B08,q0MW,Table 5,System Tool versus CFD outlet total pressure error,0.055,%,reported_error_magnitude,Relative error/magnitude as reported; absolute outlet pressure is not tabulated here.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B09,q1MW,Table 5,System Tool versus CFD outlet total pressure error,0.17,%,reported_error_magnitude,Relative error/magnitude as reported; absolute outlet pressure is not tabulated here.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B10,q3MW,Table 5,System Tool versus CFD outlet total pressure error,0.59,%,reported_error_magnitude,Relative error/magnitude as reported; absolute outlet pressure is not tabulated here.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B11,q1MW,Table 5,System Tool versus CFD outlet bulk temperature error,4.2,%,reported_error_magnitude,Relative error/magnitude as reported.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B12,q3MW,Table 5,System Tool versus CFD outlet bulk temperature error,7.8,%,reported_error_magnitude,Relative error/magnitude as reported.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B13,q1MW,Table 5,System Tool versus CFD outlet coolant wall temperature error,2.7,%,reported_error_magnitude,Relative error/magnitude as reported.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B14,q3MW,Table 5,System Tool versus CFD outlet coolant wall temperature error,1.95,%,reported_error_magnitude,Relative error/magnitude as reported.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B15,q1MW,Table 5,Re-evaluated mean heat-flux error,0.815,%,reported_error_magnitude,Paper states mean heat flux was re-evaluated from Eq. 3 with q imposed.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B16,q3MW,Table 5,Re-evaluated mean heat-flux error,0.635,%,reported_error_magnitude,Paper states mean heat flux was re-evaluated from Eq. 3 with q imposed.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B17,q0MW,"Table 1, M3",CFD outlet bulk temperature,145.338,K,published_absolute,"Zero heat-flux axial mesh study, 3000 axial cells.",https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B18,q3MW,"Table 2, M7",CFD outlet bulk temperature,194.02,K,published_absolute,"3 MW/m² radial mesh study, M7 (ny=81).",https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B19,q3MW,"Table 2, M7",CFD coolant wall temperature at x=0.7 m,241.43,K,published_absolute,"3 MW/m² radial mesh study, M7.",https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B20,q3MW,"Table 2, M7",CFD coolant wall temperature at x=1.0 m,265.93,K,published_absolute,"3 MW/m² radial mesh study, M7.",https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B21,q0MW,"Table 1, M3",Outlet total pressure numeric string as printed,94880,Pa (label as printed),raw_printed_value_ambiguous,Pressure number/unit scaling in the extracted table should be checked against the original PDF before using as an absolute acceptance target.,https://www.eucass.eu/doi/EUCASS2025-505.pdf
+B22,q3MW,"Table 2, M7",Outlet total pressure numeric string as printed,123230,Pa (label as printed),raw_printed_value_ambiguous,Pressure number/unit scaling in the extracted table should be checked against the original PDF before using as an absolute acceptance target.,https://www.eucass.eu/doi/EUCASS2025-505.pdf

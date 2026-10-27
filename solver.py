@@ -4,6 +4,8 @@ import csv
 
 import json
 
+import sys
+
 from pathlib import Path
 
 import numpy as np
@@ -218,6 +220,228 @@ def solve_coupled_thermal_profile(p_in, max_outer_iterations=60, tolerance_K=0.1
         f"within {max_outer_iterations} iterations. Last temperature residual "
         f"was {temperature_residual:.6g} K."
     )
+
+
+def run_paper_validation():
+    """Run the paper's straight methane channel cases on the supplied mesh."""
+    root = Path(__file__).resolve().parent
+    mesh_path = root / "EUCASS2025_validation_mesh_3000_cells.csv"
+    cases_path = root / "EUCASS2025_validation_cases.csv"
+    output_path = root / "validation.csv"
+    with mesh_path.open(newline="", encoding="utf-8") as source:
+        reader = csv.DictReader(source)
+        mesh_fields = reader.fieldnames
+        rows = list(reader)
+    if not rows or mesh_fields is None:
+        raise ValueError(f"Validation mesh is empty or has no header: {mesh_path}")
+    with cases_path.open(newline="", encoding="utf-8") as source:
+        validation_cases = {
+            row["case_id"]: row for row in csv.DictReader(source)
+        }
+
+    global fluid, T_coolant, m_dot_channel, relative_roughness
+    global n_nodes, n_cells, area, Dh, dx
+    fluid = next(iter(validation_cases.values()))["coolant_fluid"]
+    T_coolant = float(next(iter(validation_cases.values()))["inlet_bulk_temperature_K"])
+    roughness = 0.0  # The reference straight channel is treated as smooth.
+    x0 = np.array([float(row["x_start_m"]) for row in rows])
+    x1 = np.array([float(row["x_end_m"]) for row in rows])
+    dx = np.array([float(row["dx_m"]) for row in rows])
+    x_cell = np.array([float(row["x_center_m"]) for row in rows])
+    area = np.array([float(row["flow_area_square_m2"]) for row in rows])
+    Dh = np.array([float(row["hydraulic_diameter_m"]) for row in rows])
+    heated_flag = np.array([int(row["heated_section_flag"]) for row in rows], dtype=bool)
+    heating_area = np.array([
+        float(row["Eq32_heated_area_per_cell_m2"]) for row in rows
+    ])
+    expected_heating_area = np.where(heated_flag, np.pi * Dh * dx, 0.0)
+    if not np.allclose(heating_area, expected_heating_area, rtol=1e-9, atol=1e-15):
+        raise ValueError("Validation Eq. 32 area must be pi * Dh * dx in heated cells.")
+    n_cells = len(rows)
+    n_nodes = n_cells + 1
+    relative_roughness = roughness
+    mass_flux = float(next(iter(validation_cases.values()))["mass_flux_kg_m2_s"])
+    channel_mass_flow = mass_flux * area
+    m_dot_channel = float(channel_mass_flow[0])
+    if not np.allclose(channel_mass_flow, m_dot_channel):
+        raise ValueError("Validation mesh flow area must be constant along the channel.")
+    physics.configure_solver_context(
+        fluid=fluid, T_coolant=T_coolant, m_dot_channel=m_dot_channel,
+        relative_roughness=relative_roughness, n_nodes=n_nodes,
+        n_cells=n_cells, area=area, Dh=Dh, dx=dx,
+    )
+
+    case_inputs = {
+        "q0MW": ("q_case_0MW_W_m2", float(validation_cases["q0MW"]["CFD_case_inlet_total_pressure_Pa"])),
+        "q1MW": ("q_case_1MW_W_m2", float(validation_cases["q1MW"]["CFD_case_inlet_total_pressure_Pa"])),
+        "q3MW": ("q_case_3MW_W_m2", float(validation_cases["q3MW"]["CFD_case_inlet_total_pressure_Pa"])),
+    }
+    profiles = {}
+    for case, (q_column, inlet_pressure) in case_inputs.items():
+        q_cell = np.array([float(row[q_column]) for row in rows])
+        T_nodes = np.full(n_nodes, T_coolant)
+        for outer_iteration in range(1, 21):
+            p_nodes, T_used, velocity, rho, Re, friction, dp = physics.march_pressure(
+                inlet_pressure, T_nodes
+            )
+            cp_cell = np.empty(n_cells)
+            h_cell = np.full(n_cells, np.nan)
+            wall_cell = np.full(n_cells, np.nan)
+            for i in range(n_cells):
+                _, mu, cp_cell[i], _, k_fluid = physics.properties(T_used[i], p_nodes[i])
+                if q_cell[i] == 0.0:
+                    continue
+                wall_temperature = T_used[i] + q_cell[i] * Dh[i] / k_fluid
+                for _ in range(100):
+                    h = physics.coolant_forced_convection_coefficient(
+                        Re[i], T_used[i], wall_temperature, p_nodes[i], Dh[i],
+                        rho[i], mu, cp_cell[i], k_fluid,
+                    )
+                    next_wall_temperature = T_used[i] + q_cell[i] / h
+                    if abs(next_wall_temperature - wall_temperature) < 1e-8:
+                        wall_temperature = next_wall_temperature
+                        break
+                    wall_temperature = 0.5 * (wall_temperature + next_wall_temperature)
+                else:
+                    raise RuntimeError(f"Validation wall iteration failed in cell {i}.")
+                h_cell[i] = h
+                wall_cell[i] = wall_temperature
+
+            T_updated = physics.march_coolant_energy(
+                T_coolant, q_cell, cp_cell, heating_area, m_dot_channel
+            )
+            residual = float(np.max(np.abs(T_updated - T_nodes)))
+            if residual <= 0.1:
+                T_nodes = T_updated
+                break
+            # Imposed heat flux makes the energy march explicit; a direct
+            # profile update converges faster for this validation case.
+            T_nodes = T_updated
+        else:
+            raise RuntimeError(f"{case} validation did not converge; residual={residual:g} K")
+
+        p_nodes, T_used, velocity, rho, Re, friction, dp = physics.march_pressure(
+            inlet_pressure, T_nodes
+        )
+        # Recompute reported wall quantities on the converged state.
+        cp_cell = np.array([physics.properties(T_used[i], p_nodes[i])[2]
+                            for i in range(n_cells)])
+        for i in range(n_cells):
+            if q_cell[i] == 0.0:
+                h_cell[i] = np.nan
+                wall_cell[i] = np.nan
+                continue
+            _, mu, cp, _, k_fluid = physics.properties(T_used[i], p_nodes[i])
+            wall_temperature = T_used[i] + q_cell[i] * Dh[i] / k_fluid
+            for _ in range(100):
+                h = physics.coolant_forced_convection_coefficient(
+                    Re[i], T_used[i], wall_temperature, p_nodes[i], Dh[i],
+                    rho[i], mu, cp, k_fluid,
+                )
+                next_wall_temperature = T_used[i] + q_cell[i] / h
+                if abs(next_wall_temperature - wall_temperature) < 1e-8:
+                    wall_temperature = next_wall_temperature
+                    break
+                wall_temperature = 0.5 * (wall_temperature + next_wall_temperature)
+            h_cell[i], wall_cell[i] = h, wall_temperature
+        profiles[case] = {
+            "q": q_cell, "T_nodes": T_nodes, "p_nodes": p_nodes,
+            "T_bulk": T_used[:-1], "p_cell": p_nodes[:-1],
+            "velocity": velocity, "rho": rho, "Re": Re,
+            "friction": friction, "dp": dp, "cp": cp_cell,
+            "h": h_cell, "T_wall": wall_cell,
+        }
+        print(
+            f"{case}: inlet pressure={inlet_pressure / 1e6:.4f} MPa, "
+            f"outlet temperature={T_nodes[-1]:.3f} K, "
+            f"outlet pressure={p_nodes[-1] / 1e6:.5f} MPa, "
+            f"temperature residual={residual:.4g} K"
+        )
+
+    # Retain all input mesh/source columns and append one result set per case.
+    output_fields = list(mesh_fields)
+    result_columns = ("coolant_bulk_T_K", "coolant_wall_T_K", "pressure_Pa",
+                      "h_c_W_m2K", "Re", "velocity_m_s", "dp_Pa")
+    for case in case_inputs:
+        output_fields.extend(f"{case}_{name}" for name in result_columns)
+    with output_path.open("w", newline="", encoding="utf-8") as destination:
+        writer = csv.DictWriter(destination, fieldnames=output_fields)
+        writer.writeheader()
+        for i, original in enumerate(rows):
+            row = dict(original)
+            for case, result in profiles.items():
+                values = {
+                    "coolant_bulk_T_K": result["T_bulk"][i],
+                    "coolant_wall_T_K": result["T_wall"][i],
+                    "pressure_Pa": result["p_cell"][i],
+                    "h_c_W_m2K": result["h"][i],
+                    "Re": result["Re"][i],
+                    "velocity_m_s": result["velocity"][i],
+                    "dp_Pa": result["dp"][i],
+                }
+                for name, value in values.items():
+                    row[f"{case}_{name}"] = f"{value:.10g}" if np.isfinite(value) else ""
+            writer.writerow(row)
+
+    x_nodes = np.append(x0, x1[-1])
+    for quantity, ylabel, title, filename in (
+        ("T_nodes", "Coolant bulk temperature [K]", "Validation coolant temperature", "validation_temperature.png"),
+        ("p_nodes", "Coolant pressure [MPa]", "Validation coolant pressure", "validation_pressure.png"),
+    ):
+        fig, ax = plotting.plt.subplots(figsize=(9, 5))
+        for case, result in profiles.items():
+            values = result[quantity] / 1e6 if quantity == "p_nodes" else result[quantity]
+            ax.plot(x_nodes, values, label=case)
+        ax.axvspan(0.4, 1.2, color="grey", alpha=0.12, label="Heated section")
+        ax.set(xlabel="Axial position [m]", ylabel=ylabel, title=title)
+        ax.grid(True)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(root / filename, dpi=160)
+    fig, ax = plotting.plt.subplots(figsize=(9, 5))
+    for case, result in profiles.items():
+        mask = np.isfinite(result["T_wall"])
+        ax.plot(x_cell[mask], result["T_wall"][mask], label=case)
+    ax.axvspan(0.4, 1.2, color="grey", alpha=0.12, label="Heated section")
+    ax.set(xlabel="Axial position [m]", ylabel="Coolant-side wall temperature [K]",
+           title="Validation coolant-side wall temperature")
+    ax.grid(True)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(root / "validation_wall_temperature.png", dpi=160)
+    print(f"Circular heated area per case: {heating_area.sum():.9f} m^2")
+    q0_reference = float(validation_cases["q0MW"]["published_CFD_T_bulk_out_K"])
+    q3_reference = float(validation_cases["q3MW"]["published_CFD_T_bulk_out_K"])
+    print(
+        f"Published CFD references (not direct 1D acceptance values): "
+        f"q0MW solver={profiles['q0MW']['T_nodes'][-1]:.3f} K, "
+        f"CFD mesh table={q0_reference:.3f} K; "
+        f"q3MW solver={profiles['q3MW']['T_nodes'][-1]:.3f} K, "
+        f"CFD mesh table={q3_reference:.2f} K "
+        f"({100 * (profiles['q3MW']['T_nodes'][-1] / q3_reference - 1):+.2f}%)."
+    )
+    for x_target, reference in (
+        (0.7, float(validation_cases["q3MW"]["published_Twc_at_x_0p7m_K"])),
+        (1.0, float(validation_cases["q3MW"]["published_Twc_at_x_1p0m_K"])),
+    ):
+        cell = int(np.argmin(np.abs(x_cell - x_target)))
+        calculated = profiles["q3MW"]["T_wall"][cell]
+        print(
+            f"Published q3MW coolant-wall temperature at x={x_target:.1f} m: "
+            f"solver={calculated:.2f} K, table={reference:.2f} K."
+        )
+    print(f"Validation profiles written to {output_path}")
+    print(
+        "Heat-transfer limitation: the paper uses CFD-averaged h_c values for "
+        "its validation tool; those numerical values are blank in the case "
+        "file. This run uses the existing coolant correlation from channel.py."
+    )
+    plotting.show_plots()
+
+
+if "--validation" in sys.argv:
+    run_paper_validation()
+    raise SystemExit(0)
 
 script_dir = Path(__file__).resolve().parent
 
