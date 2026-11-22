@@ -1,7 +1,12 @@
 """Physics functions and local solver kernels for regenerative cooling."""
 
 import csv
+from functools import lru_cache
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
+from scipy.interpolate import RegularGridInterpolator
 from CoolProp.CoolProp import PropsSI
 from fluids.core import Reynolds
 from fluids.friction import friction_factor
@@ -9,7 +14,11 @@ from scipy.optimize import least_squares
 
 
 def configure_solver_context(**values):
-    """Provide operating state and mesh arrays to legacy solver kernels."""
+    """Set shared fluid, flow, and mesh data used by the marching kernels.
+
+    This keeps the low-level pressure and cell solvers tied to the current
+    operating case without passing the same mesh arrays through every call.
+    """
     globals().update(values)
 
 
@@ -195,7 +204,12 @@ def solve_thermal_equilibrium_eq3(T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h
     return q, T_wall_hot, T_wall_coolant
 
 def channel_geometry(radius, N_ch, w_b, delta):
-    """Return local channel width, area and hydraulic diameter."""
+    """Compute channel geometry from engine radius and channel dimensions.
+
+    Pitch is ``2*pi*radius/N_ch``; width is pitch minus rib thickness.
+    Flow area is ``width*delta`` and hydraulic diameter is ``4A/P`` for the
+    rectangular channel, i.e. ``2*width*delta/(width+delta)``.
+    """
 
     pitch = 2.0 * np.pi * radius / N_ch
     width = pitch - w_b
@@ -211,24 +225,66 @@ def channel_geometry(radius, N_ch, w_b, delta):
 
     return width, area, Dh
 
+
+
+@lru_cache(maxsize=1)
+def _n2o_property_interpolator():
+    """Load the shared N₂O grid once, in the order returned by properties()."""
+    directory = Path(__file__).resolve().parent / "n2o_property_tables"
+    filenames = (
+        "density_kg_m3.csv",
+        "viscosity_pa_s.csv",
+        "cp_j_kgk.csv",
+        "enthalpy_j_kg.csv",
+        "conductivity_w_mk.csv",
+    )
+    grid = None
+    tables = []
+    for filename in filenames:
+        frame = pd.read_csv(directory / filename, index_col="T_K")
+        axes = (frame.index.to_numpy(dtype=float), frame.columns.to_numpy(dtype=float))
+        if grid is None:
+            grid = axes
+        elif any(not np.array_equal(axis, reference) for axis, reference in zip(axes, grid)):
+            raise ValueError(f"{filename} does not match the shared N₂O property grid.")
+        values = frame.to_numpy(dtype=float)
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{filename} contains missing or non-finite N₂O properties.")
+        tables.append(values)
+    return RegularGridInterpolator(
+        grid,
+        np.stack(tables, axis=-1),
+        method="linear",
+        bounds_error=True,
+    )
+
+
 def properties(T, p):
-    """CoolProp properties at one local state."""
+    """Return density, viscosity, specific heat, enthalpy, and conductivity in SI."""
+    use_n2o_table = fluid == "NitrousOxide"
+    source = "N₂O property tables" if use_n2o_table else "CoolProp"
     try:
-        rho = PropsSI("D", "T", T, "P", p, fluid)
-        mu = PropsSI("V", "T", T, "P", p, fluid)
-        cp = PropsSI("C", "T", T, "P", p, fluid)
-        h = PropsSI("H", "T", T, "P", p, fluid)
-        k = PropsSI("L", "T", T, "P", p, fluid)
+        if use_n2o_table:
+            rho, mu, cp, h, k = _n2o_property_interpolator()((T, p))
+        else:
+            rho = PropsSI("D", "T", T, "P", p, fluid)
+            mu = PropsSI("V", "T", T, "P", p, fluid)
+            cp = PropsSI("C", "T", T, "P", p, fluid)
+            h = PropsSI("H", "T", T, "P", p, fluid)
+            k = PropsSI("L", "T", T, "P", p, fluid)
     except Exception as exc:
         raise RuntimeError(
-            f"CoolProp failed for {fluid} at T={T} K, p={p} Pa."
+            f"{source} lookup failed for {fluid} at T={T} K, p={p} Pa. {exc}"
         ) from exc
 
     values = np.asarray([rho, mu, cp, h, k], dtype=float)
     if not np.all(np.isfinite(values)):
-        raise RuntimeError(f"CoolProp returned non-finite properties at T={T} K, p={p} Pa.")
+        raise RuntimeError(f"{source} returned non-finite properties at T={T} K, p={p} Pa.")
     if rho <= 0.0 or mu <= 0.0 or cp <= 0.0 or k <= 0.0:
-        raise RuntimeError(f"CoolProp returned non-positive transport properties at T={T} K, p={p} Pa.")
+        raise RuntimeError(
+            f"{source} returned non-positive density, viscosity, specific heat, or "
+            f"conductivity at T={T} K, p={p} Pa."
+        )
 
     return rho, mu, cp, h, k
 
@@ -253,14 +309,19 @@ def coolant_forced_convection_coefficient(
     if Dh <= 0.0 or rho <= 0.0 or mu_bulk <= 0.0 or cp <= 0.0 or k <= 0.0:
         raise ValueError("Eq. 17 requires positive geometry and bulk properties.")
 
+    use_n2o_table = fluid == "NitrousOxide"
+    source = "N₂O property tables" if use_n2o_table else "CoolProp"
     try:
-        mu_wall = PropsSI("V", "T", T_wall, "P", p, fluid)
+        if use_n2o_table:
+            _, mu_wall, _, _, _ = _n2o_property_interpolator()((T_wall, p))
+        else:
+            mu_wall = PropsSI("V", "T", T_wall, "P", p, fluid)
     except Exception as exc:
         raise RuntimeError(
-            f"CoolProp could not evaluate liquid wall viscosity at T={T_wall} K, p={p} Pa."
+            f"{source} could not evaluate wall viscosity at T={T_wall} K, p={p} Pa. {exc}"
         ) from exc
     if not np.isfinite(mu_wall) or mu_wall <= 0.0:
-        raise RuntimeError("CoolProp returned invalid wall viscosity for Eq. 17.")
+        raise RuntimeError(f"{source} returned invalid wall viscosity for Eq. 17.")
 
     Pr = cp * mu_bulk / k
     if not np.isfinite(Pr) or Pr <= 0.0:
@@ -548,9 +609,17 @@ def march_coolant_energy(T_in, q_cell, cp_cell, A_heating_cell, m_dot_total):
     return T
 
 def pressure_loss(f, rho, velocity, dx, Dh):
+    """Return cell Darcy-Weisbach loss, ``f*(rho*v^2/2)*(dx/Dh)``."""
     return f * (rho * velocity**2 / 2.0) * (dx / Dh)
 
 def march_pressure(p_in, coolant_temperature_nodes=None):
+    """March coolant pressure from inlet to outlet, one cell at a time.
+
+    At each upstream state, CoolProp properties determine velocity and
+    Reynolds number. The friction correlation supplies ``f`` and the
+    Darcy-Weisbach equation supplies ``dp``; pressure is updated by
+    ``p[i+1] = p[i] - dp[i]``. Returns node pressure and cell diagnostics.
+    """
     p = np.zeros(n_nodes)
     if coolant_temperature_nodes is None:
         T = np.full(n_nodes, T_coolant)
@@ -571,7 +640,7 @@ def march_pressure(p_in, coolant_temperature_nodes=None):
     p[0] = p_in
 
     for i in range(n_cells):
-        # Evaluate properties at the current upstream state.
+        # Evaluate coolant properties at the current upstream temperature and pressure.
         rho, mu, cp, h, k = properties(T[i], p[i])
 
         # The configured flow is total across all parallel channels.
@@ -595,7 +664,7 @@ def march_pressure(p_in, coolant_temperature_nodes=None):
             f[i], rho, velocity[i], dx[i], Dh[i]
         )
 
-        # Downstream pressure.
+        # Darcy-Weisbach pressure loss is applied across this axial cell.
         p[i + 1] = p[i] - dp[i]
 
         if not np.isfinite(p[i + 1]) or p[i + 1] <= 0.0:
@@ -605,10 +674,22 @@ def march_pressure(p_in, coolant_temperature_nodes=None):
 
     return p, T, velocity, rho_cell, Re, f, dp
 
+@lru_cache(maxsize=None)
+def _critical_pressure(coolant_fluid):
+    return PropsSI("pcrit", coolant_fluid)
+
+
+def coolant_saturation_temperature(p, above_critical=10000.0):
+    """Return the saturation temperature in K, or a sentinel at and above pcrit."""
+    if p >= _critical_pressure(fluid):
+        return above_critical
+    return PropsSI("T", "P", p, "Q", 0, fluid)
+
+
 def solve_cell_thermal_equilibrium_iterative(
     T_aw, T_coolant, p, h_g, q_rad, Re, Dh, rho, mu_bulk, cp, k_fluid,
     width, t_wall, w_b, delta, tolerance_K=0.1, max_iterations=250,
-    cell_index=None, x_position_m=None,
+    cell_index=None, x_position_m=None, *, debug=False,
 ):
     """Iterate Eq. 3 with single-phase coolant Eqs. 14-17 and 23-24.
 
@@ -636,6 +717,13 @@ def solve_cell_thermal_equilibrium_iterative(
 
     def residuals(wall_temperatures):
         T_wall_hot, T_wall_coolant = wall_temperatures
+        if debug:
+            evaluation = len(residual_history) + 1
+            print(
+                f"  [cell {cell_index}, eval {evaluation}] "
+                f"T_hot={T_wall_hot:.6f} K, T_wall_coolant={T_wall_coolant:.6f} K",
+                flush=True,
+            )
         T_wall_mean = 0.5 * (T_wall_hot + T_wall_coolant)
         k_wall = inconel718_conductivity(T_wall_mean)
         h_c, _, _ = single_phase_corrected_coefficient_eq14_to24(
@@ -648,11 +736,19 @@ def solve_cell_thermal_equilibrium_iterative(
         normalized = np.asarray([(q_gas - q_wall) / heat_scale,
                                  (q_wall - q_coolant) / heat_scale])
         residual_history.append(normalized.copy())
+        if debug:
+            print(
+                f"  [cell {cell_index}, eval {evaluation}] "
+                f"normalized residuals (gas-wall, wall-coolant)="
+                f"({normalized[0]:+.3e}, {normalized[1]:+.3e}), "
+                f"q_wall={q_wall:.3e} W/m^2, h_c={h_c:.3e} W/(m^2 K)",
+                flush=True,
+            )
         return normalized
 
     upper_wall_temperature = 1375.0  # Upper validated limit of supplied k_wall(T).
     try:
-        T_sat = PropsSI("T", "P", p, "Q", 0, fluid)
+        T_sat = coolant_saturation_temperature(p)
     except Exception as exc:
         raise RuntimeError(
             f"Could not determine {fluid} saturation temperature at p={p} Pa."
@@ -674,6 +770,14 @@ def solve_cell_thermal_equilibrium_iterative(
     ])
     upper_bounds = np.asarray([upper_wall_temperature, upper_wall_coolant])
     initial = np.minimum(initial, upper_bounds - 1e-6)
+    if debug:
+        print(
+            f"  [cell {cell_index}] Wall bounds in K "
+            f"(hot, coolant): lower=({T_coolant:.3f}, {T_coolant:.3f}), "
+            f"upper=({upper_bounds[0]:.3f}, {upper_bounds[1]:.3f}); "
+            f"h_g={h_g:.3e} W/(m^2 K), q_rad={q_rad:.3e} W/m^2",
+            flush=True,
+        )
     solution = least_squares(
         residuals,
         initial,
@@ -682,6 +786,7 @@ def solve_cell_thermal_equilibrium_iterative(
         ftol=1e-12,
         gtol=1e-12,
         max_nfev=max_iterations * 10,
+        verbose=2 if debug else 0,
     )
     if not solution.success or np.max(np.abs(residuals(solution.x))) > 1e-8:
         plot_eq3_residual_convergence(
@@ -719,10 +824,21 @@ def solve_cell_thermal_equilibrium_iterative(
             f"Eq. 3 wall solution missed the paper's {tolerance_K:g} K "
             f"convergence tolerance by {consistency:.6g} K."
         )
+    if debug:
+        print(
+            f"  [cell {cell_index}] Wall balance converged: "
+            f"q={q:.3e} W/m^2, temperature consistency error={consistency:.3e} K",
+            flush=True,
+        )
     return q, T_wall_hot_check, T_wall_coolant_check, k_wall, h_c, solution.nfev
 
 def write_thermal_outputs_to_csv(path, node_profiles):
-    """Write derived thermal profiles while preserving source CSV columns/data."""
+    """Update derived CSV columns while preserving mesh and source data.
+
+    Output profiles must have one value per axial node and match existing
+    columns. A temporary file is written and then atomically replaces the
+    source so a partial write does not leave a truncated input file.
+    """
     with path.open("r", newline="", encoding="utf-8") as source:
         reader = csv.DictReader(source)
         fieldnames = reader.fieldnames

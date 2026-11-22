@@ -20,7 +20,7 @@ FUNCTION load_config(file):
 ## Build axial mesh and cell inputs
 
 ```text
-READ required axial columns from CSV
+READ required axial columns from `data/HORUS_regen_cooling_axial_inputs.csv`
 REQUIRE at least two rows, finite values, and strictly increasing axial positions
 REQUIRE physically valid positive radii, area ratios, gas properties, and gamma > 1
 

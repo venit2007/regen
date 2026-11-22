@@ -10,7 +10,8 @@ python solver.py
 
 The solver reads fixed operating conditions and channel dimensions from
 `config.json`, and reads the axial mesh, engine contour, and gas-property
-profiles from `HORUS_regen_cooling_axial_inputs.csv`. Paths are resolved from
+profiles from `data/HORUS_regen_cooling_axial_inputs.csv`. Reference datasets
+and PDFs are also stored in `data/`. Paths are resolved from
 the script directory, so the command can also be run from another working
 directory.
 
@@ -100,6 +101,6 @@ profile.
 ## Outputs
 
 On a successful run, calculated thermal profiles are written to the existing
-output columns in `HORUS_regen_cooling_axial_inputs.csv`, preserving the input
+output columns in `data/HORUS_regen_cooling_axial_inputs.csv`, preserving the input
 mesh and source columns. Pressure, temperature, and convergence diagnostics
 are saved as figures in the script directory and displayed at runtime.

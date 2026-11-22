@@ -28,6 +28,6 @@ all of the following keys:
 The solver computes per-channel flow once as
 `m_dot_channel = m_dot / N_ch` and uses that value in the channel flow
 calculations. Axial coordinates and engine radii come from
-`HORUS_regen_cooling_axial_inputs.csv` in metres. The gas stagnation and throat
-scalars above come from `RPA-4KN-R2S-Engine.pdf`; `gas_c_star_m_s` uses the
+`data/HORUS_regen_cooling_axial_inputs.csv` in metres. The gas stagnation and throat
+scalars above come from `data/RPA-4KN-R2S-Engine.pdf`; `gas_c_star_m_s` uses the
 ideal-performance value (the report also lists a delivered value).
