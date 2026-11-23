@@ -14,6 +14,8 @@ all of the following keys:
 | `delta` | Channel height | m, positive |
 | `w_b` | Rib thickness | m, positive |
 | `t_wall` | Hot-wall thickness | m, positive |
+| `t_tbc` | Gas-side YSZ coating thickness. Zero represents a bare wall. | m, non-negative. Defaults to zero. |
+| `k_tbc` | Effective through-thickness thermal conductivity of the coating | W/(m·K), positive. Required when `t_tbc` is nonzero. |
 | `relative_roughness` | Relative roughness, `ε / D` | Dimensionless, non-negative |
 | `gas_p0_Pa` | Chamber stagnation pressure from the RPA report | Pa, positive |
 | `gas_c_star_m_s` | Ideal characteristic velocity from RPA Table 4 | m/s, positive |
@@ -28,6 +30,6 @@ all of the following keys:
 The solver computes per-channel flow once as
 `m_dot_channel = m_dot / N_ch` and uses that value in the channel flow
 calculations. Axial coordinates and engine radii come from
-`HORUS_regen_cooling_axial_inputs.csv` in metres. The gas stagnation and throat
-scalars above come from `RPA-4KN-R2S-Engine.pdf`; `gas_c_star_m_s` uses the
+`data/HORUS_regen_cooling_axial_inputs.csv` in metres. The gas stagnation and throat
+scalars above come from `data/RPA-4KN-R2S-Engine.pdf`; `gas_c_star_m_s` uses the
 ideal-performance value (the report also lists a delivered value).
