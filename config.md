@@ -14,6 +14,8 @@ all of the following keys:
 | `delta` | Channel height | m, positive |
 | `w_b` | Rib thickness | m, positive |
 | `t_wall` | Hot-wall thickness | m, positive |
+| `t_tbc` | Gas-side YSZ coating thickness. Zero represents a bare wall. | m, non-negative. Defaults to zero. |
+| `k_tbc` | Effective through-thickness thermal conductivity of the coating | W/(m·K), positive. Required when `t_tbc` is nonzero. |
 | `relative_roughness` | Relative roughness, `ε / D` | Dimensionless, non-negative |
 | `gas_p0_Pa` | Chamber stagnation pressure from the RPA report | Pa, positive |
 | `gas_c_star_m_s` | Ideal characteristic velocity from RPA Table 4 | m/s, positive |

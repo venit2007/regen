@@ -1,9 +1,10 @@
-"""Search channel height and rib thickness with NSGA-II."""
+"""Search channel height, rib thickness, and hot-wall thickness with NSGA-II."""
 
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
 import csv
 import json
+from math import nextafter
 from pathlib import Path
 import runpy
 import shutil
@@ -20,7 +21,7 @@ OFFSPRING = 50
 MUTATION_PROBABILITY = 0.2
 GENERATIONS = 40
 FIELDS = (
-    "evaluation", "delta_m", "w_b_m", "cells_solved", "last_cell_x_m",
+    "evaluation", "delta_m", "w_b_m", "t_wall_m", "cells_solved", "last_cell_x_m",
     "pressure_drop_pa", "thermal_converged", "status", "log",
 )
 
@@ -56,13 +57,13 @@ class CoolingEvaluator:
             csv.DictWriter(stream, FIELDS).writeheader()
 
     def evaluate(self, design):
-        delta, rib_width = key = tuple(map(float, design))
+        delta, rib_width, wall_thickness = key = tuple(map(float, design))
         if key in self.records:
             return self.records[key]
 
         evaluation = len(self.records) + 1
         log_path = self.output / f"case-{evaluation:04d}.log"
-        config = {**self.config, "delta": delta, "w_b": rib_width}
+        config = {**self.config, "delta": delta, "w_b": rib_width, "t_wall": wall_thickness}
         (self.work / "config.json").write_text(json.dumps(config), encoding="utf-8")
         (self.work / MESH).write_bytes(self.mesh)
         cells, pressure_drop, converged = None, None, False
@@ -93,7 +94,8 @@ class CoolingEvaluator:
         else:
             status = "PASS" if cells >= self.required_cells else "FAIL"
         record = dict(
-            evaluation=evaluation, delta_m=delta, w_b_m=rib_width, cells_solved=cells,
+            evaluation=evaluation, delta_m=delta, w_b_m=rib_width,
+            t_wall_m=wall_thickness, cells_solved=cells,
             last_cell_x_m=self.x_cells[cells - 1] if cells else None,
             pressure_drop_pa=pressure_drop, thermal_converged=converged,
             status=status, log=log_path.name,
@@ -128,7 +130,7 @@ def save_plots(output, records, pareto):
             facecolors="none", edgecolors="black", s=90, label="Pareto front",
         )
     geometry.set(xlabel="Channel height δ [mm]", ylabel="Rib thickness w_b [mm]",
-                 zlabel="Cells solved", title="Candidate geometry")
+                 zlabel="Cells solved", title="Candidates projected onto channel dimensions")
     objectives.set(xlabel="Modeled pressure drop [MPa]", ylabel="Cells solved",
                    title="Objective trade-off")
     for axes in (geometry, objectives):
@@ -170,8 +172,9 @@ def main():
         class CoolingProblem(ElementwiseProblem):
             def __init__(self):
                 super().__init__(
-                    n_var=2, n_obj=2, n_ieq_constr=1,
-                    xl=[0.0005, 0.0002], xu=[0.0019, 0.0014],
+                    n_var=3, n_obj=2, n_ieq_constr=1,
+                    xl=[0.0005, 0.0002, nextafter(0.001, 0.002)],
+                    xu=[0.0019, 0.0014, 0.002],
                 )
 
             def _evaluate(self, design, out, *args, **kwargs):

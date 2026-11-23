@@ -7,7 +7,7 @@ import requests
 
 # 1. Define your solver's temperature and pressure grid bounds (in SI units)
 T_MIN_K = 310.0
-T_MAX_K = 710.0
+T_MAX_K = 810.0
 T_STEP_K = 1.0          # 1 K resolution
 
 P_MIN_PA = 6.5e6        # Minimum expected channel pressure (e.g., p_target_out)

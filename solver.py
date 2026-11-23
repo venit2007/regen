@@ -42,7 +42,11 @@ def load_config(path):
     if not isinstance(config["fluid"], str) or not config["fluid"].strip():
         raise ValueError("'fluid' must be a non-empty string.")
 
-    numeric_keys = required - {"fluid", "N_ch"}
+    config.setdefault("t_tbc", 0.0)
+    if config["t_tbc"] != 0.0 and "k_tbc" not in config:
+        raise ValueError("'k_tbc' is required when coating thickness is nonzero.")
+    config.setdefault("k_tbc", 1.0)
+    numeric_keys = (required - {"fluid", "N_ch"}) | {"t_tbc", "k_tbc"}
     for key in numeric_keys:
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
@@ -53,7 +57,7 @@ def load_config(path):
 
     for key in (
         "T_coolant", "p_in", "p_target_out", "m_dot", "delta", "w_b",
-        "t_wall", "gas_p0_Pa", "gas_c_star_m_s", "gas_D_star_m",
+        "t_wall", "k_tbc", "gas_p0_Pa", "gas_c_star_m_s", "gas_D_star_m",
         "gas_r_c_m", "gas_mu0_Pa_s", "gas_cp0_J_kgK", "gas_Pr0",
         "gas_rho0_kg_m3", "gas_mu_ref_power_exponent",
     ):
@@ -61,6 +65,8 @@ def load_config(path):
             raise ValueError(f"'{key}' must be positive.")
     if config["relative_roughness"] < 0:
         raise ValueError("'relative_roughness' must be non-negative.")
+    if config["t_tbc"] < 0:
+        raise ValueError("'t_tbc' must be non-negative.")
     if config["gas_mu_ref_power_exponent"] <= 0:
         raise ValueError("'gas_mu_ref_power_exponent' must be positive.")
 
@@ -81,7 +87,8 @@ def write_thermal_snapshot(results, n_done):
             )
         return nodes
 
-    q_gas = h_g_profile * (T_aw_cell_K - results["T_wall_hot"]) + results["q_rad"]
+    T_gas_surface = results["T_wall_hot"] + results["q"] * tbc_resistance
+    q_gas = h_g_profile * (T_aw_cell_K - T_gas_surface) + results["q_rad"]
     profiles = {
         "T_aw_K": T_aw_profile_K,
         "h_g_W_m2K": cells_to_nodes(h_g_profile, n_cells),
@@ -107,6 +114,9 @@ def plot_thermal_snapshot(results, progress=None):
         coolant_label="Coolant bulk temperature (current Eq. 7 march)",
         T_saturation=results["T_sat"],
         T_metal=0.5 * (results["T_wall_hot"] + results["T_wall_coolant"]),
+        T_coating_surface=(
+            results["T_wall_hot"] + results["q"] * tbc_resistance if tbc_resistance else None
+        ),
     )
     plotting.plot_coolant_velocity(x_cell, results["velocity"])
 
@@ -195,7 +205,8 @@ def solve_coupled_thermal_profile(p_in, max_outer_iterations=60, tolerance_K=0.1
                         T_aw_cell_K[i], T_used[i], p_nodes[i], h_g_profile[i],
                         q_rad_cell[i], Re_cells[i], Dh[i], rho, mu, cp, k_fluid,
                         width[i], t_wall, w_b, delta,
-                        cell_index=i, x_position_m=x_cell[i], debug=debug,
+                        cell_index=i, x_position_m=x_cell[i],
+                        tbc_resistance=tbc_resistance, debug=debug,
                     )
                 )
             except Exception as exc:
@@ -259,7 +270,8 @@ def solve_coupled_thermal_profile(p_in, max_outer_iterations=60, tolerance_K=0.1
                     flush=True,
                 )
             if temperature_residual <= tolerance_K:
-                q_gas_cells = h_g_profile * (T_aw_cell_K - T_wall_hot_cell) + q_rad_cell
+                T_gas_surface = T_wall_hot_cell + q_cell * tbc_resistance
+                q_gas_cells = h_g_profile * (T_aw_cell_K - T_gas_surface) + q_rad_cell
                 q_wall_cells = k_wall_cell / t_wall * (
                     T_wall_hot_cell - T_wall_coolant_cell
                 )
@@ -557,6 +569,7 @@ delta = config["delta"]
 w_b = config["w_b"]
 
 t_wall = config["t_wall"]
+tbc_resistance = config["t_tbc"] / config["k_tbc"]
 
 relative_roughness = config["relative_roughness"]
 
@@ -1013,6 +1026,7 @@ plotting.plot_temperature_profiles(
     T_wall_coolant_cell,
     T_saturation=T_sat_cell,
     T_metal=0.5 * (T_wall_hot_cell + T_wall_coolant_cell),
+    T_coating_surface=T_wall_hot_cell + q_cell * tbc_resistance if tbc_resistance else None,
 )
 
 plotting.show_plots()

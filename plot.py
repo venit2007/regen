@@ -107,7 +107,7 @@ def plot_pressure_profiles(x, p_coolant, gas_pressure, target_outlet_pressure, *
 def plot_temperature_profiles(
     x, x_cell, gas_temperature, T_aw, T_coolant_nodes, T_wall_hot=None, T_wall_coolant=None,
     coolant_label="Coolant bulk temperature", T_saturation=None,
-    T_metal=None,
+    T_metal=None, T_coating_surface=None,
 ):
     """Create one labeled figure with every available axial temperature."""
     ax = _profile_panel(1, "temperature_profiles.png")
@@ -119,9 +119,11 @@ def plot_temperature_profiles(
     ax.plot(x, T_aw, label="Adiabatic wall temperature, Eqs. 5–6")
     ax.plot(x, T_coolant_nodes, linestyle="--", label=coolant_label)
     if T_wall_hot is not None:
-        ax.plot(x_cell, T_wall_hot, label="Hot-side wall temperature")
+        ax.plot(x_cell, T_wall_hot, label="Hot-side metal temperature")
     if T_wall_coolant is not None:
         ax.plot(x_cell, T_wall_coolant, label="Coolant-side wall temperature")
+    if T_coating_surface is not None:
+        ax.plot(x_cell, T_coating_surface, label="Gas-facing coating temperature")
     if T_metal is not None:
         ax.plot(
             x_cell,

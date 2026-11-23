@@ -163,16 +163,18 @@ def inconel718_conductivity(T):
             f"Inconel 718 conductivity correlation not validated at T={T} K"
         )
 
-def solve_thermal_equilibrium_eq3(T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c):
+def solve_thermal_equilibrium_eq3(
+    T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c, *, tbc_resistance=0.0,
+):
     """Solve the local coupled wall balance in paper Eq. 3.
 
-    Return ``(q, T_wall_hot, T_wall_coolant)`` in SI units. The equivalent
-    closed form (paper Eq. 4) retains radiation as a separate gas-side input.
+    Return ``(q, T_wall_hot, T_wall_coolant)`` in SI units. Both wall
+    temperatures refer to the metal. The coating adds a series resistance.
     This function does not estimate its inputs: callers must provide the
     coefficients and material/radiation values from valid source data.
     """
     values = np.asarray(
-        [T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c], dtype=float
+        [T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c, tbc_resistance], dtype=float
     )
     if not np.all(np.isfinite(values)):
         raise ValueError("Paper Eq. 3 inputs must be finite.")
@@ -182,16 +184,19 @@ def solve_thermal_equilibrium_eq3(T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h
         raise ValueError("Paper Eq. 3 requires positive h_g, k_wall, t_wall and h_c.")
     if q_rad < 0.0:
         raise ValueError("Paper Eq. 3 requires non-negative q_rad into the wall.")
+    if tbc_resistance < 0.0:
+        raise ValueError("Coating resistance must be non-negative.")
 
     # Paper Eq. 4: eliminate T_wg and T_wc from the coupled balance in Eq. 3.
-    resistance = 1.0 / h_g + t_wall / k_wall + 1.0 / h_c
+    resistance = 1.0 / h_g + tbc_resistance + t_wall / k_wall + 1.0 / h_c
     q = ((T_aw - T_coolant) + q_rad / h_g) / resistance
     # Recover the coupled wall-temperature unknowns using paper Eq. 3.
-    T_wall_hot = T_aw - (q - q_rad) / h_g
+    T_coating_surface = T_aw - (q - q_rad) / h_g
+    T_wall_hot = T_coating_surface - q * tbc_resistance
     T_wall_coolant = T_coolant + q / h_c
 
     # Check gas-to-wall, wall-conduction, and wall-to-coolant fluxes (Eq. 3).
-    q_gas = h_g * (T_aw - T_wall_hot) + q_rad
+    q_gas = h_g * (T_aw - T_coating_surface) + q_rad
     q_wall = (k_wall / t_wall) * (T_wall_hot - T_wall_coolant)
     q_coolant = h_c * (T_wall_coolant - T_coolant)
     results = np.asarray([q, T_wall_hot, T_wall_coolant, q_gas, q_wall, q_coolant])
@@ -689,7 +694,7 @@ def coolant_saturation_temperature(p, above_critical=10000.0):
 def solve_cell_thermal_equilibrium_iterative(
     T_aw, T_coolant, p, h_g, q_rad, Re, Dh, rho, mu_bulk, cp, k_fluid,
     width, t_wall, w_b, delta, tolerance_K=0.1, max_iterations=250,
-    cell_index=None, x_position_m=None, *, debug=False,
+    cell_index=None, x_position_m=None, *, tbc_resistance=0.0, debug=False,
 ):
     """Iterate Eq. 3 with single-phase coolant Eqs. 14-17 and 23-24.
 
@@ -707,6 +712,8 @@ def solve_cell_thermal_equilibrium_iterative(
         raise ValueError("Local thermal-iteration temperatures and properties must be positive.")
     if q_rad < 0.0 or tolerance_K <= 0.0 or max_iterations <= 0:
         raise ValueError("Local thermal iteration has invalid radiation or iteration controls.")
+    if not np.isfinite(tbc_resistance) or tbc_resistance < 0.0:
+        raise ValueError("Coating resistance must be finite and non-negative.")
     if T_aw <= T_coolant:
         raise ValueError("Eq. 3 requires adiabatic wall temperature above coolant bulk temperature.")
 
@@ -730,8 +737,9 @@ def solve_cell_thermal_equilibrium_iterative(
             Re, T_coolant, T_wall_coolant, p, Dh, rho, mu_bulk, cp, k_fluid,
             width, w_b, k_wall, delta,
         )
-        q_gas = h_g * (T_aw - T_wall_hot) + q_rad
         q_wall = k_wall / t_wall * (T_wall_hot - T_wall_coolant)
+        T_coating_surface = T_wall_hot + q_wall * tbc_resistance
+        q_gas = h_g * (T_aw - T_coating_surface) + q_rad
         q_coolant = h_c * (T_wall_coolant - T_coolant)
         normalized = np.asarray([(q_gas - q_wall) / heat_scale,
                                  (q_wall - q_coolant) / heat_scale])
@@ -810,7 +818,8 @@ def solve_cell_thermal_equilibrium_iterative(
         width, w_b, k_wall, delta,
     )
     q, T_wall_hot_check, T_wall_coolant_check = solve_thermal_equilibrium_eq3(
-        T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c
+        T_aw, T_coolant, h_g, q_rad, k_wall, t_wall, h_c,
+        tbc_resistance=tbc_resistance,
     )
     consistency = max(
         abs(T_wall_hot_check - T_wall_hot),
