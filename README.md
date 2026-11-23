@@ -19,6 +19,19 @@ directory.
 loads inputs and runs the pressure/thermal iteration. `plot.py` contains the
 plotting code.
 
+Use multiple worker processes for the independent wall-cell solves:
+
+```bash
+python solver.py --workers 4 --snapshot-every 0
+```
+
+The default is one worker and a live snapshot every five cells. Set
+`--snapshot-every 0` to skip intermediate plot and CSV saves while retaining
+the final outputs and failure diagnostics. Pressure marching, coolant energy
+updates, and outer iterations run in sequence. Wall-cell results are collected
+in coolant-flow order so the solver reports the first failed cell and its
+completed upstream prefix. The worker setting applies to the coupled solver.
+
 ## Coupled solver workflow
 
 1. The CSV axial nodes define the non-uniform mesh. Cell-centred inputs are

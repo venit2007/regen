@@ -10,7 +10,7 @@ This file gives a working map of the repository for the next AI agent or develop
 - A prior standard run reported an infeasible wall balance at cell 247, approximately `x=0.28265 m`, with the hot-side wall trial at the 1375 K upper limit of the Inconel correlation. That report was produced before the current `config.json` switch to N₂O, so it is not a verified failure result for the current configuration.
 - The validation pathway is available with `python solver.py --validation`. It uses the supplied EUCASS mesh and case metadata, Eq. 32 circular heated area (`N_ch*pi*Dh*dx`), and square flow area for mass flow. The existing coolant heat-transfer correlation is used because the supplied paper metadata does not provide the CFD-averaged `h_c` values used in the paper's 1-D comparisons. Treat the saved validation outputs as a correlation-based reproduction, not an exact reproduction of the paper's averaged-coefficient run.
 - The saved validation output contains three cases. The last recorded run reported outlet bulk temperatures of 118.000 K, 139.490 K, and 179.551 K for 0, 1, and 3 MW/m² respectively. The 3 MW/m² result is 7.46% below the published 194.02 K CFD value; the q0 case remains at its 118 K inlet temperature because the imposed heat flux is zero.
-- The standard solver runs substantial setup and calculation code at module import time. Run it as a script; do not import `solver.py` as a passive library module without first separating the top-level execution.
+- The standard solver starts setup and execution from its script entry point. Use `--workers` to parallelize wall-cell solves and `--snapshot-every` to set how often intermediate plots and CSV results are saved.
 
 ## Running the solver
 

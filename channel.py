@@ -695,6 +695,7 @@ def solve_cell_thermal_equilibrium_iterative(
     T_aw, T_coolant, p, h_g, q_rad, Re, Dh, rho, mu_bulk, cp, k_fluid,
     width, t_wall, w_b, delta, tolerance_K=0.1, max_iterations=250,
     cell_index=None, x_position_m=None, *, tbc_resistance=0.0, debug=False,
+    report_residuals=None,
 ):
     """Iterate Eq. 3 with single-phase coolant Eqs. 14-17 and 23-24.
 
@@ -797,9 +798,8 @@ def solve_cell_thermal_equilibrium_iterative(
         verbose=2 if debug else 0,
     )
     if not solution.success or np.max(np.abs(residuals(solution.x))) > 1e-8:
-        plot_eq3_residual_convergence(
-            residual_history, cell_index=cell_index, x_position_m=x_position_m
-        )
+        if report_residuals is not None:
+            report_residuals(residual_history, cell_index=cell_index, x_position_m=x_position_m)
         raise RuntimeError(
             "No converged single-phase Eq. 3 wall balance below coolant "
             "saturation; the requested no-boiling solution is not supported "
@@ -826,9 +826,8 @@ def solve_cell_thermal_equilibrium_iterative(
         abs(T_wall_coolant_check - T_wall_coolant),
     )
     if consistency > tolerance_K:
-        plot_eq3_residual_convergence(
-            residual_history, cell_index=cell_index, x_position_m=x_position_m
-        )
+        if report_residuals is not None:
+            report_residuals(residual_history, cell_index=cell_index, x_position_m=x_position_m)
         raise RuntimeError(
             f"Eq. 3 wall solution missed the paper's {tolerance_K:g} K "
             f"convergence tolerance by {consistency:.6g} K."
@@ -840,6 +839,36 @@ def solve_cell_thermal_equilibrium_iterative(
             flush=True,
         )
     return q, T_wall_hot_check, T_wall_coolant_check, k_wall, h_c, solution.nfev
+
+
+def solve_wall_cell(inputs, *, t_wall, w_b, delta, tbc_resistance, debug):
+    """Evaluate one cell using fixed pressure-pass inputs, without writing outputs."""
+    i, x_position, T_aw, T_bulk, p, h_g, q_rad, Re, Dh, width = inputs
+    try:
+        rho, mu, cp, _, k_fluid = properties(T_bulk, p)
+    except Exception as exc:
+        # Report errors in axial order, including when several cells share a task.
+        return None, None, None, exc, []
+    try:
+        T_sat = coolant_saturation_temperature(p, above_critical=np.nan)
+    except Exception:
+        T_sat = np.inf
+
+    residual_history = []
+
+    def record_residuals(history, **_):
+        residual_history.extend(history)
+
+    try:
+        solution = solve_cell_thermal_equilibrium_iterative(
+            T_aw, T_bulk, p, h_g, q_rad, Re, Dh, rho, mu, cp, k_fluid,
+            width, t_wall, w_b, delta, cell_index=i, x_position_m=x_position,
+            tbc_resistance=tbc_resistance, debug=debug, report_residuals=record_residuals,
+        )
+    except Exception as exc:
+        return cp, T_sat, None, exc, residual_history
+    return cp, T_sat, solution, None, residual_history
+
 
 def write_thermal_outputs_to_csv(path, node_profiles):
     """Update derived CSV columns while preserving mesh and source data.
